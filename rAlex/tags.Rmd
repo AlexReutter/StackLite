@@ -1,0 +1,46 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r set-options, echo=FALSE, cache=FALSE}
+options(width = 240)
+```
+
+```{r echo = FALSE}
+library(knitr)
+opts_chunk$set(message = FALSE, warning = FALSE, cache = TRUE,
+               cache.path = "../README-cache/",
+               fig.path = "../README-fig/")
+```
+
+
+```{r echo=FALSE}
+library(readr)
+library(dplyr)
+
+if (!tryCatch(is.data.frame(question_tags), error=function(cond) FALSE)) {
+  question_tags <- read_csv("../question_tags.csv.gz", progress = FALSE)
+}
+```
+
+
+### question_tags
+Look at the columns in question_tags
+```{r}
+head(question_tags,10)
+```
+
+How many records are there?
+```{r}
+count(question_tags)
+```
+
+Most popular tags:
+```{r question_tags_count, dependson = "load_data"}
+question_tags %>%
+  count(Tag, sort = TRUE)
+```
+
+How many unique tags?
+
+

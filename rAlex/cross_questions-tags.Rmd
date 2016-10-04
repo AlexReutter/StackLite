@@ -1,0 +1,73 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r set-options, echo=FALSE, cache=FALSE}
+options(width = 120)
+```
+
+```{r echo = FALSE}
+library(knitr)
+opts_chunk$set(message = FALSE, warning = FALSE, cache = TRUE,
+               cache.path = "README-cache/",
+               fig.path = "README-fig/")
+```
+
+
+```{r echo=FALSE}
+library(readr)
+library(dplyr)
+
+if (!tryCatch(is.data.frame(questions), error=function(cond) FALSE)) {
+  questions <- read_csv("../questions.csv.gz", progress = FALSE)
+}
+if (!tryCatch(is.data.frame(question_tags), error=function(cond) FALSE)) {
+  question_tags <- read_csv("../question_tags.csv.gz", progress = FALSE)
+}
+```
+
+
+### question_tags
+Look at the columns in question_tags
+```{r}
+head(question_tags,10)
+```
+
+How many records are there?
+```{r}
+count(question_tags)
+```
+
+Most popular tags:
+```{r question_tags_count, dependson = "load_data"}
+question_tags %>%
+  count(Tag, sort = TRUE)
+```
+
+How many unique tags?
+
+
+### Cross questions/question_tags
+
+Or you could compare the growth of particular tags over time:
+
+```{r tags_per_year, dependson = "load_data"}
+library(lubridate)
+
+tags <- c("c#", "javascript", "python", "r")
+
+q_per_year <- questions %>%
+  count(Year = year(CreationDate)) %>%
+  rename(YearTotal = n)
+
+tags_per_year <- question_tags %>%
+  filter(Tag %in% tags) %>%
+  inner_join(questions) %>%
+  count(Year = year(CreationDate), Tag) %>%
+  inner_join(q_per_year)
+
+ggplot(tags_per_year, aes(Year, n / YearTotal, color = Tag)) +
+  geom_line() +
+  scale_y_continuous(labels = scales::percent_format()) +
+  ylab("% of Stack Overflow questions with this tag")
+```

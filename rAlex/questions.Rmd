@@ -1,0 +1,270 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo = FALSE}
+library(knitr)
+opts_chunk$set(message = FALSE, warning = FALSE, cache = TRUE,
+               cache.path = "../README-cache/",
+               fig.path = "../README-fig/")
+```
+
+
+```{r echo=FALSE}
+library(readr)
+library(dplyr)
+
+if (!tryCatch(is.data.frame(questions), error=function(cond) FALSE)) {
+  questions <- read_csv("../questions.csv.gz", progress = FALSE)
+}
+```
+
+### questions
+First, let's investigate the *questions* dataframe.  There are `r dim(questions)[1]` rows and `r dim(questions)[2]` columns in *questions*; now let's take a quick look at what each column represents:
+```{r}
+head(questions,10)
+```
+
+Next I want some overall summary statistics:
+```{r}
+library(dplyr)
+# This took forever to run
+#summary(questions)
+# This ran very fast
+questions %>% sample_n(size=100000) %>% summary()
+```
+Hunh. Normally I would run summary() in order to get summary statistics on all the fields in one place, but it looks like summary() is not performant on 46M records, though it's very fast to grab a sample of 100k records and run summary() on that, so I have a reasonable idea of the summary statistics for the full dataset.
+
+We'll do summaries of the complete set of rows as we look at each column in turn.
+
+
+#### CreationDate
+
+```{r}
+library(dplyr)
+# This took forever to run
+#t(questions %>% summarize_at(vars(CreationDate),funs(min,quantile,max,mean,sd)))
+t(questions %>% summarize_at(vars(CreationDate),funs(min,median,max,mean)))
+questions %>% 
+  filter(!is.na(CreationDate)) %>%
+  summarize(n())
+```
+OIC.  summary() is slow because it's computing order statistics (quartiles) -- [dplyr](https://cran.r-project.org/web/packages/dplyr/dplyr.pdf)'s summarize() chokes on quantile() with 46M records.  This is a good reminder to be wary when working with larger data, and that R's standard summary statistics are not optimized for larger data; there doesn't seem to be an option for computing estimated, rather than exact, sample quartiles.
+
+So we can get some of the summary statistics quickly and easily, though I can't seem to get count() or n() to work within funs() of summarize(); ideally, I want to compute the number of missing values during the same data pass where I'm calculating the other summary statistics.
+
+More illuminating than the summary statistics is the plot of the number of new questions created per week (from David's original post):
+```{r questions_per_week, dependson = "load_data"}
+library(ggplot2)
+library(lubridate)
+
+questions %>%
+  count(Week = round_date(CreationDate, "week")) %>%
+  ggplot(aes(Week, n)) +
+  geom_line()
+```
+
+A few things to note:
+* There's a changepoint in the series.  The graph shows a steady increase in the number of questions asked from July 2008 to the start of 2014, where the series reaches a steady state.  
+* There's clear yearly seasonality when the number of new questions drops precipitously in the last week of the year.
+* There's potentially interesting yearly seasonality where the number of new questions is higher in Q1 (as everyone tries to keep their New Year's resolutions to learn more about some new language?) but the visual evidence isn't strong.
+
+
+#### ClosedDate
+
+In order to get summary statistics for ClosedDate using dplyr, I need to filter out the NAs.  
+```{r}
+library(dplyr)
+# This gave all NAs
+t(questions %>% summarize_at(vars(ClosedDate),funs(min,median,max,mean)))
+
+# This gave what I was looking for.
+questions %>% 
+  filter(!is.na(ClosedDate)) %>%
+  summarize(n())
+questions %>% 
+  filter(!is.na(ClosedDate)) %>%
+  summarize_at(vars(ClosedDate),funs(min,median,max,mean)) %>%
+  t()
+```
+
+Again, these summary statistics themselves are not particularly interesting, except that the number of closed questions is about 10% of the overall number of questions.
+
+Adapting David's plot of the number of questions created per week, let's look at the number of questions closed per week:
+
+```{r closed_per_week, dependson = "load_data"}
+library(ggplot2)
+library(lubridate)
+
+questions %>%
+  count(Week = round_date(ClosedDate, "week")) %>%
+  ggplot(aes(Week, n)) +
+  ylim(0,20000) +
+  geom_line()
+```
+
+This starts to get at the question of the rate of question closure over time, because we can see the pattern of question closure in the plot.  A few things to note:
+* Like the number of questions asked per week, the number of questions closed per week increases until it reaches a steady state
+* Unlike the number of questions asked per week, the number of questions closed appears to have two changepoints.  The number of questions closed per week increases slowly from July 2008 until the end of 2010, when the slope changes from Jan 2011 to the end of 2012, at which point it reaches its steady state
+* There isn't a clear seasonal dip in the number of questions closed at the end of the year
+* There is a serious outlier in early 2014 where nearly 20,000 questions were closed in a single week. Is this an administrative action?
+
+
+We might also want to examine how long it takes before a question is closed, and how that changes over time.  
+
+```{r}
+questions$timeToClose <- as.numeric(difftime(questions$ClosedDate,questions$CreationDate,units="days"))
+questions %>% 
+  filter(!is.na(timeToClose)) %>%
+  summarize_at(vars(timeToClose),funs(min,median,max,mean)) %>%
+  t()
+hist(questions$timeToClose)
+
+Week <- round_date(questions$CreationDate, "week")
+aggClosingTime <- aggregate(questions$timeToClose ~ Week, data=questions, mean)
+ggplot(aggClosingTime, aes(aggClosingTime$Week,aggClosingTime$'questions$timeToClose')) + geom_line()
+```
+
+Not entirely surprisingly, questions created further in the past have had more time to be closed.  However, the time to close questions also has a highly skewed distribution, so the distribution of time to close those early questions could be skewed by a few questions that took a long time to close.
+
+```{r echo=FALSE}
+questions %>%
+  filter(timeToClose > 1) %>%
+  summarize_at(vars(timeToClose),funs(min,median,max,mean)) %>%
+  t()
+```
+
+#### DeletionDate
+```{r}
+library(dplyr)
+questions %>% 
+  filter(!is.na(DeletionDate)) %>%
+  summarize(n())
+questions %>% 
+  filter(!is.na(DeletionDate)) %>%
+  summarize_at(vars(DeletionDate),funs(min,median,max,mean)) %>%
+  t()
+```
+
+More than twice as many questions have been deleted than closed.  
+
+Number of questions deleted per week:
+
+```{r deleted_per_week}
+library(ggplot2)
+library(lubridate)
+
+questions %>%
+  count(Week = round_date(DeletionDate, "week")) %>%
+  ggplot(aes(Week, n)) +
+  ylim(0,50000) +
+  geom_line()
+```
+
+Similarly, this starts to get at the question of the rate of question deletion over time. Some things to note:
+* Like number of questions closed, the number of questions deleted appears to have two changepoints.  The number of questions deleted per week increases slowly from July 2008 until the end of 2010, when the slope changes from Jan 2011 to the end of 2014, at which point it may have reached its steady state -- this is difficult to tell, because there hasn't been much time to judge whether this is so.
+* There are many more "outlying" points in this chart.  2013-2014 is an especially chaotic period. 
+
+
+We might also want to examine how long it takes before a question is deleted, and how that changes over time.  
+
+```{r}
+questions$timeToDelete <- as.numeric(difftime(questions$DeletionDate,questions$CreationDate,units="days"))
+questions %>% 
+  filter(!is.na(timeToDelete)) %>%
+  summarize_at(vars(timeToDelete),funs(min,median,max,mean)) %>%
+  t()
+hist(questions$timeToDelete)
+
+aggDeletionTime <- aggregate(questions$timeToDelete ~ Week, data=questions, mean)
+ggplot(aggDeletionTime, aes(aggDeletionTime$Week,aggDeletionTime$'questions$timeToDelete')) + geom_line()
+```
+
+As with questions closed, questions created further in the past have had more time to be deleted, with the same concerns about the skewed distribution for time to delete.  However, there are a couple of oddities to note:
+* The distribution of time to delete is bimodal. The expected highly-skewed distribution is broken up by a spike around... could that be 365 days?  Is there an administrative job that auto-deletes questions after a year?
+* There is a sudden dropoff in the plot of time to delete over time. If there is an admin job that auto-deletes questions, then this dropoff is likely due to the fact that the yearly admin job hasn't yet affected questions opened after the dropoff.
+
+
+```{r eval=FALSE}
+questions$closed <- !is.na(questions$ClosedDate)
+questions$deleted <- !is.na(questions$DeletionDate)
+###summary(questions$closed)
+as.data.frame(table(questions$closed,questions$deleted))
+count(questions, vars=c("closed","deleted"))  ### I thought this would be equivalent to the line above, but it returns errors instead
+```
+
+#### Score
+```{r}
+library(dplyr)
+questions %>% 
+  filter(!is.na(Score)) %>%
+  summarize_at(vars(Score),funs(min,median,max,mean)) %>%
+  t()
+```
+
+There's a wide range of values for question Score, with the median smack at 0. This is an instance where it would be great to have Q1 and Q3, so that we'd know to expect a cruddy histogram:
+
+```{r}
+ggplot(data=questions, aes(questions$Score)) + geom_histogram()
+```
+
+The histogram is dominated by the 0 values; nearly half of the questions asked have a 0 score.
+
+```{r}
+questions %>%
+  filter(Score==0) %>%
+  dim()
+```
+
+However, even when you remove all the 0's, the histogram is still dominated by small values:
+
+```{r}
+ggplot(data=filter(questions,Score!=0), aes(Score)) + geom_histogram()
+```
+
+Focusing in on the values closest to 0, we get a slightly better view of the distribution of values.   
+
+```{r}
+ggplot(data=questions, aes(questions$Score)) + xlim(-10, 10) + geom_histogram()
+```
+
+
+#### OwnerUserId
+Number of unique users who have asked questions:
+```{r}
+length(unique(questions$OwnerUserId))
+```
+
+A listing of the users who have asked the most questions, presented in two different ways:
+```{r}
+uniqueOwners <- as.data.frame(table(questions$OwnerUserId))
+head(uniqueOwners[order(-uniqueOwners$Freq),],20)
+
+uniqueOwners2 <- count(questions, c(questions$OwnerUserId))
+head(uniqueOwners2[order(-uniqueOwners2$n),],20)
+```
+
+I prefer the latter because I get the NAs by default. 3.6M questions where we don't have a user ID for the asker is significant.
+
+
+#### AnswerCount
+```{r}
+library(dplyr)
+questions %>% 
+  filter(!is.na(AnswerCount)) %>%
+  summarize_at(vars(AnswerCount),funs(min,median,max,mean)) %>%
+  t()
+```
+
+How do you get a negative AnswerCount?!
+
+Histogram of number of answers to a question:
+```{r}
+ggplot(data=questions, aes(questions$AnswerCount)) + geom_histogram()
+```
+
+Like Score, the number of answers is dominated by small counts. Focusing in on the values closest to 0, we get a slightly better view of the distribution of values.
+
+```{r}
+ggplot(data=questions, aes(questions$AnswerCount)) + xlim(-5, 10)  + geom_histogram()
+```
